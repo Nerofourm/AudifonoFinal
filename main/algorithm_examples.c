@@ -29,7 +29,7 @@ static const char *TAG = "ALGORITHM_EXAMPLES";
 /* Debug original input data for AEC feature*/
 // #define DEBUG_ALGO_INPUT
 
-#define I2S_SAMPLE_RATE     16000
+#define I2S_SAMPLE_RATE     8000
 #if CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
 #define I2S_CHANNELS        I2S_CHANNEL_FMT_RIGHT_LEFT
 #else
@@ -152,7 +152,7 @@ void app_main()
 #if (CONFIG_ESP_LYRAT_MINI_V1_1_BOARD || CONFIG_ESP32_S3_KORVO2_V3_BOARD)
     audio_board_handle_t board_handle = (audio_board_handle_t) audio_calloc(1, sizeof(struct audio_board_handle));
     audio_hal_codec_config_t audio_codec_cfg = AUDIO_CODEC_DEFAULT_CONFIG();
-    audio_codec_cfg.i2s_iface.samples = AUDIO_HAL_08K_SAMPLES;
+    audio_codec_cfg.i2s_iface.samples = AUDIO_HAL_08K_SAMPLES; //AUDIO_HAL_44K_SAMPLES,   /*!< set to 44.1k samples per second */
     board_handle->audio_hal = audio_hal_init(&audio_codec_cfg, &AUDIO_CODEC_ES8311_DEFAULT_HANDLE);
     board_handle->adc_hal = audio_board_adc_init();
 #else
@@ -176,7 +176,7 @@ void app_main()
     algo_config.input_type = ALGORITHM_STREAM_INPUT_TYPE2;
 #endif
 #if CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
-    algo_config.ref_linear_factor = 10;
+    algo_config.ref_linear_factor = 3;
 #endif
 #ifdef DEBUG_ALGO_INPUT
     algo_config.debug_input = true;
@@ -187,9 +187,27 @@ void app_main()
     algo_config.sample_rate = I2S_SAMPLE_RATE;
     algo_config.out_rb_size = ESP_RING_BUFFER_SIZE;
     audio_element_handle_t element_algo = algo_stream_init(&algo_config);
-    audio_element_set_music_info(element_algo, I2S_SAMPLE_RATE, 1, ALGORITHM_STREAM_DEFAULT_SAMPLE_BIT);
+    audio_element_set_music_info(element_algo, I2S_SAMPLE_RATE, 1, ALGORITHM_STREAM_DEFAULT_SAMPLE_BIT);//
     audio_element_set_read_cb(element_algo, i2s_read_cb, NULL);
     audio_element_set_input_timeout(element_algo, portMAX_DELAY);
+
+    rsp_filter_cfg_t rsp_cfg_w1 = DEFAULT_RESAMPLE_FILTER_CONFIG();
+    rsp_cfg_w1.src_rate = 16000;//
+    rsp_cfg_w1.src_ch = 1;
+    rsp_cfg_w1.dest_rate = 44100;
+    // rsp_cfg_w1.mode = 0;
+    rsp_cfg_w1.type= ESP_RESAMPLE_TYPE_RESAMPLE;
+
+#if CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
+    rsp_cfg_w1.dest_ch = 2;
+#else
+    rsp_cfg_w1.dest_ch = 1;
+#endif
+    rsp_cfg_w1.complexity = 5;
+    audio_element_handle_t filter_w1 = rsp_filter_init(&rsp_cfg_w1);
+    // audio_element_set_write_cb(filter_w1, i2s_write_cb, NULL);
+    // audio_element_set_output_timeout(filter_w1, portMAX_DELAY);
+
 
     ESP_LOGI(TAG, "[3.2] Create wav encoder to encode wav format");
     wav_encoder_cfg_t wav_cfg = DEFAULT_WAV_ENCODER_CONFIG();
@@ -202,12 +220,15 @@ void app_main()
 
     ESP_LOGI(TAG, "[3.4] Register all elements to audio pipeline_rec");
     audio_pipeline_register(pipeline_rec, element_algo, "algo");
+    audio_pipeline_register(pipeline_rec, filter_w1, "filter_w1");
     audio_pipeline_register(pipeline_rec, wav_encoder, "wav_encoder");
     audio_pipeline_register(pipeline_rec, fatfs_stream_writer, "fatfs_stream");
 
     ESP_LOGI(TAG, "[3.5] Link it together [codec_chip]-->algorithm-->wav_encoder-->fatfs_stream-->[sdcard]");
-    const char *link_rec[3] = {"algo", "wav_encoder", "fatfs_stream"};
-    audio_pipeline_link(pipeline_rec, &link_rec[0], 3);
+    // const char *link_rec[3] = {"algo", "wav_encoder", "fatfs_stream"};
+    const char *link_rec[4] = {"algo", "filter_w1","wav_encoder", "fatfs_stream"};
+    // audio_pipeline_link(pipeline_rec, &link_rec[0], 3);
+    audio_pipeline_link(pipeline_rec, &link_rec[0], 4);
 
     ESP_LOGI(TAG, "[3.6] Set up  uri (file as fatfs_stream, wav as wav encoder)");
 #ifdef DEBUG_ALGO_INPUT
@@ -226,9 +247,9 @@ void app_main()
     audio_element_set_read_cb(mp3_decoder, mp3_music_read_cb, NULL);
 
     rsp_filter_cfg_t rsp_cfg_w = DEFAULT_RESAMPLE_FILTER_CONFIG();
-    rsp_cfg_w.src_rate = 16000;
+    rsp_cfg_w.src_rate = 16000;//
     rsp_cfg_w.src_ch = 1;
-    rsp_cfg_w.dest_rate = 44100;
+    rsp_cfg_w.dest_rate = I2S_SAMPLE_RATE;
 #if CONFIG_ESP_LYRAT_MINI_V1_1_BOARD
     rsp_cfg_w.dest_ch = 2;
 #else
@@ -271,7 +292,7 @@ void app_main()
 
     audio_element_info_t fat_info = {0};
     audio_element_getinfo(fatfs_stream_writer, &fat_info);
-    fat_info.sample_rates = 44100;
+    fat_info.sample_rates = I2S_SAMPLE_RATE;
     fat_info.bits = ALGORITHM_STREAM_DEFAULT_SAMPLE_BIT;
 #ifdef DEBUG_ALGO_INPUT
     fat_info.channels = 2;
