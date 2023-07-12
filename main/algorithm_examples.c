@@ -292,7 +292,8 @@ void app_main()
 
     audio_element_info_t fat_info = {0};
     audio_element_getinfo(fatfs_stream_writer, &fat_info);
-    fat_info.sample_rates = I2S_SAMPLE_RATE;
+    fat_info.sample_rates = 44100;
+    //fat_info.sample_rates = I2S_SAMPLE_RATE;
     fat_info.bits = ALGORITHM_STREAM_DEFAULT_SAMPLE_BIT;
 #ifdef DEBUG_ALGO_INPUT
     fat_info.channels = 2;
